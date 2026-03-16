@@ -1,0 +1,54 @@
+version: "3.9"
+
+# =============================================================
+#  Laboratorio HTTP Request Smuggling - CL.TE
+#
+#  Arquitectura:
+#    Cliente → HAProxy:80 → Django/Daphne:8000 (HTTP)
+#                         → Django/Daphne:8001 (WebSocket)
+#
+#  Vulnerabilidad:
+#    HAProxy lee Content-Length para delimitar la request.
+#    Daphne procesa Transfer-Encoding: chunked si está presente.
+#    → El cuerpo "sobrante" envenenará la siguiente request.
+# =============================================================
+
+services:
+
+  # ─────────────────────────────────────────
+  # Django + Daphne (backend vulnerable)
+  # ─────────────────────────────────────────
+  django:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+  
+    volumes:
+      - .:/app                   # Hot-reload: cambios en código se reflejan al instante
+    expose:
+      - "6767"                   # HTTP (solo accesible desde la red interna)
+      - "8001"                   # WebSocket (solo accesible desde la red interna)
+    networks:
+      - lab_net
+
+  # ─────────────────────────────────────────
+  # HAProxy (frontend - crea condición CL.TE)
+  # ─────────────────────────────────────────
+  haproxy:
+    # image: haproxy:1.8-alpine
+    image: vladimirjk/haproxy-docker-logs:1.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"       # Punto de entrada principal del lab
+      - "8404:8404"   # Panel de estadísticas → http://localhost:8404/stats
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - django
+    networks:
+      - lab_net
+
+networks:
+  lab_net:
+    driver: bridge
